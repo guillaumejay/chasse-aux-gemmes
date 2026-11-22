@@ -144,6 +144,10 @@ let TW, TH, WH, SLAB, ox, oy; // geometrie iso : tuile, hauteur de mur, epaisseu
 function start(i) {
   li = i; lv = L.level(i);
   save.last = i; persist();
+  lv.hedge = lv.tiles.map((t, c) => t === '#' && [-1, 0, 1].some(dy => [-1, 0, 1].some(dx => {
+    const x = c % lv.w + dx, y = ((c / lv.w) | 0) + dy;
+    return x >= 0 && y >= 0 && x < lv.w && y < lv.h && !'# '.includes(lv.tiles[y * lv.w + x]);
+  })));
   st = L.init(lv); moves = 0; hist = []; anim = null; queued = null; won = false; dead = false; shot = null; facing = 0;
   $('win').hidden = true;
   $('hint').textContent = HINTS[i] || '';
@@ -249,7 +253,11 @@ function box(u0, v0, u1, v1, h, top, left, right) {
 }
 
 // Mur, porte ou grille : tout ce a quoi une cloison se raccorde.
-const wallish = (i, j) => i >= 0 && j >= 0 && i < lv.w && j < lv.h && '#RBG'.includes(lv.tiles[j * lv.w + i]);
+const wallish = (i, j) => {
+  if (i < 0 || j < 0 || i >= lv.w || j >= lv.h) return false;
+  const c = j * lv.w + i;
+  return 'RBG'.includes(lv.tiles[c]) || lv.hedge[c];
+};
 
 // Porte ou grille : une barre fine en travers de la case, dans l'axe des murs voisins.
 function drawBar(x, y, h, C) {
@@ -274,16 +282,42 @@ function drawKey(cx, cy, kind, time, i) {
   line(kind === 'r' ? '#ff5a5a' : '#5a9bff', u * .05);
 }
 
-// Mur fin : un poteau central, relie aux murs voisins par des bras.
-const WT = .3; // epaisseur, en fraction de case
+const cellHash = (x, y) => ((x * 73856093) ^ (y * 19349663) ^ ((li + 1) * 83492791)) >>> 0;
+
+// Arbre des zones pleines : tronc et feuillage en trois boules, taille variable selon la case.
+function drawTree(x, y) {
+  const [cx, cy] = iso(x, y), hsh = cellHash(x, y), k = .85 + (hsh % 5) * .08, u = TW * k;
+  const ball = (dx, dy, r, col) => { ctx.fillStyle = col; ctx.beginPath(); ctx.arc(cx + dx * u, cy + dy * u, r * u, 0, 7); ctx.fill(); };
+  ctx.fillStyle = 'rgba(0,0,0,.22)';
+  ctx.beginPath(); ctx.ellipse(cx, cy, u * .3, u * .14, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = '#6b4a2b'; ctx.fillRect(cx - u * .04, cy - u * .26, u * .08, u * .26);
+  const dark = hsh % 3 === 0;
+  ball(0, -.36, .27, dark ? '#256b2f' : '#2f7a33');
+  ball(-.14, -.44, .2, dark ? '#2f7f38' : '#3c9440');
+  ball(.13, -.47, .19, dark ? '#2f7f38' : '#3c9440');
+  ball(-.02, -.58, .19, dark ? '#3f9646' : '#56b052');
+  ball(-.08, -.64, .07, dark ? '#58ad5c' : '#7ccb6e');
+}
+
+// Haie : un massif central, relie aux haies voisines par des bras, avec quelques touffes claires.
+const WT = .42; // epaisseur, en fraction de case
 function drawWall(x, y) {
-  const W = wallish;
-  const a = .5 - WT / 2, b = .5 + WT / 2, C = ['#bdb7a6', '#8f8878', '#746d5f'];
-  if (W(x, y - 1)) box(x + a, y, x + b, y + a, WH, ...C);
-  if (W(x - 1, y)) box(x, y + a, x + a, y + b, WH, ...C);
-  box(x + a, y + a, x + b, y + b, WH, ...C);
-  if (W(x + 1, y)) box(x + b, y + a, x + 1, y + b, WH, ...C);
-  if (W(x, y + 1)) box(x + a, y + b, x + b, y + 1, WH, ...C);
+  if (!lv.hedge[y * lv.w + x]) return drawTree(x, y);
+  const W = wallish, H = WH * .8;
+  const a = .5 - WT / 2, b = .5 + WT / 2, C = ['#4f9a3a', '#3b7a2c', '#2f6524'];
+  const tufts = [[.5, .5]];
+  if (W(x, y - 1)) { box(x + a, y, x + b, y + a, H, ...C); tufts.push([.5, .14]); }
+  if (W(x - 1, y)) { box(x, y + a, x + a, y + b, H, ...C); tufts.push([.14, .5]); }
+  box(x + a, y + a, x + b, y + b, H, ...C);
+  if (W(x + 1, y)) { box(x + b, y + a, x + 1, y + b, H, ...C); tufts.push([.86, .5]); }
+  if (W(x, y + 1)) { box(x + a, y + b, x + b, y + 1, H, ...C); tufts.push([.5, .86]); }
+  const hsh = cellHash(x, y);
+  tufts.forEach(([u, v], i) => {
+    const q = pt(x + u, y + v, H), j = ((hsh >> (i * 3)) % 5 - 2) * TW * .012;
+    ctx.fillStyle = '#69b84c'; ctx.beginPath(); ctx.ellipse(q[0] + j, q[1], TW * .075, TW * .045, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = '#8fd66a'; ctx.beginPath(); ctx.ellipse(q[0] + j - TW * .02, q[1] - TW * .012, TW * .03, TW * .018, 0, 0, 7); ctx.fill();
+    if ((hsh >> (i + 9)) % 6 === 0) { ctx.fillStyle = '#ff8fb0'; ctx.beginPath(); ctx.arc(q[0] - j, q[1] + TW * .01, TW * .018, 0, 7); ctx.fill(); }
+  });
 }
 
 // Statue tireuse : un totem de pierre, fleche rouge sur le dessus, bouche sur la face visible.
