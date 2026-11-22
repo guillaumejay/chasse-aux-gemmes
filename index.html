@@ -1,0 +1,584 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>Chasse aux Gemmes</title>
+<style>
+  :root { --bg:#1c2a22; --panel:#2f4435; --ink:#f3f6ea; --dim:#a9b89f; --accent:#ffb347; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--ink);
+    font-family:system-ui,"Segoe UI",sans-serif; overscroll-behavior:none; }
+  body { display:flex; flex-direction:column; align-items:center; gap:8px; padding:12px; }
+  h1 { margin:0; font-size:22px; letter-spacing:.5px; }
+  h1 span { color:var(--accent); }
+  #hud { display:flex; gap:14px; font-size:15px; color:var(--dim); }
+  #hud b { color:var(--ink); }
+  #hint { min-height:1.3em; color:#ffd166; font-size:15px; text-align:center; }
+  #wrap { position:relative; }
+  canvas { display:block; touch-action:none; }
+  nav { display:flex; gap:8px; flex-wrap:wrap; justify-content:center; }
+  button { font:inherit; color:var(--ink); background:var(--panel); border:1px solid #4f6b54;
+    border-radius:10px; padding:8px 14px; cursor:pointer; }
+  button:hover:not(:disabled) { background:#3c5743; }
+  button:disabled { opacity:.35; cursor:default; }
+  #pad button { font-size:18px; padding:6px 16px; }
+  #win { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center;
+    justify-content:center; gap:10px; background:rgba(28,42,34,.88); border-radius:14px; }
+  #win[hidden] { display:none; }
+  #win h2 { margin:0; font-size:30px; }
+  #stars { font-size:40px; color:#ffd166; letter-spacing:6px; }
+  #win p { margin:0; color:var(--dim); }
+  #win button { background:var(--accent); color:#3a2408; border:0; font-weight:600; }
+  small { color:var(--dim); text-align:center; }
+  #menu { position:fixed; inset:0; z-index:5; overflow:auto; background:var(--bg);
+    display:flex; flex-direction:column; align-items:center; gap:14px; padding:24px 12px; }
+  #menu[hidden] { display:none; }
+  #menu h1 { font-size:32px; }
+  #menu > p { margin:0; color:var(--dim); }
+  .cat { width:min(660px,100%); background:var(--panel); border-radius:14px; padding:12px 14px; }
+  .cat h2 { margin:0; font-size:18px; display:flex; justify-content:space-between; }
+  .cat h2 span { color:var(--dim); font-size:14px; font-weight:400; }
+  .cat p { margin:2px 0 10px; color:var(--dim); font-size:14px; }
+  .lvls { display:flex; flex-wrap:wrap; gap:8px; }
+  .lvls button { min-width:70px; display:flex; flex-direction:column; align-items:center; gap:2px; background:var(--bg); }
+  .lvls b { font-size:17px; }
+  .lvls i { font-style:normal; font-size:12px; color:var(--dim); }
+  .lvls em { font-style:normal; font-size:13px; color:#ffd166; letter-spacing:1px; }
+</style>
+</head>
+<body>
+<div id="menu">
+  <h1>Chasse aux <span>Gemmes</span></h1>
+  <p>Choisis un niveau, Lori !</p>
+  <div id="cats" style="display:contents"></div>
+</div>
+<h1>Chasse aux <span>Gemmes</span></h1>
+<div id="hud">
+  <span><b id="hLevel"></b></span>
+  <span>Gemmes <b id="hGems"></b></span>
+  <span>Coups <b id="hMoves"></b></span>
+  <span id="hBest"></span>
+  <span id="hKeys"></span>
+</div>
+<div id="hint"></div>
+<div id="wrap">
+  <canvas id="c"></canvas>
+  <div id="win" hidden>
+    <h2 id="winTitle">Bravo !</h2>
+    <div id="stars"></div>
+    <p id="winText"></p>
+    <button id="bNext">Niveau suivant</button>
+  </div>
+</div>
+<nav id="pad">
+  <button data-d="1">↖</button><button data-d="3">↗</button>
+  <button data-d="2">↙</button><button data-d="0">↘</button>
+</nav>
+<nav>
+  <button id="bMenu">Menu</button>
+  <button id="bPrev" title="Niveau précédent">◀</button>
+  <button id="bUndo">Annuler</button>
+  <button id="bReset">Recommencer</button>
+  <button id="bFwd" title="Niveau suivant">▶</button>
+</nav>
+<small>Clavier : ← ↖ · ↑ ↗ · → ↘ · ↓ ↙. Ou glisser le doigt en diagonale. Retour arrière = annuler, R = recommencer.</small>
+
+<script src="logic.js"></script>
+<script>
+const L = GemLogic, $ = id => document.getElementById(id);
+const cv = $('c'), ctx = cv.getContext('2d');
+const SPEED = 8; // pas par seconde
+const COLORS = ['#5ee6c4', '#ff8fa3', '#ffd166', '#7cc6ff', '#c79bff', '#ff9f68'];
+const KEY = 'chasse-aux-gemmes-3';
+const HINTS = [
+  'Ramasse toutes les gemmes, puis rejoins la sortie.',
+  'Pousse le rocher dans la lave pour passer.',
+  'Une caisse flotte sur l\'eau. Un rocher, lui, coule !',
+  'Rocher pour la lave, caisse pour l\'eau. Une caisse brûle dans la lave.',
+  'On pousse, on ne tire pas : attention aux coins.',
+  'Les statues tirent des flèches en ligne droite. Abrite-toi derrière un objet.',
+];
+Object.assign(HINTS, {
+  9: 'Une clé ouvre une porte de sa couleur, une seule fois.',
+  11: 'La grille reste ouverte tant que quelque chose pèse sur la plaque.',
+  13: 'Sur la glace, on glisse jusqu\'au premier obstacle. Les objets aussi.',
+  15: 'Un téléporteur envoie sur son jumeau, objets compris.',
+  17: 'Les dalles fissurées s\'effondrent derrière toi.',
+});
+
+// Categories du menu : le tutoriel regroupe les niveaux qui expliquent une regle,
+// les autres sont ranges selon leur nombre minimal de coups.
+const CATS = [
+  { name: 'Tutoriel', desc: 'Des niveaux courts pour apprendre chaque règle.', ids: [] },
+  { name: 'Simples', desc: 'Moins de 30 coups.', ids: [] },
+  { name: 'Moyens', desc: 'De 30 à 60 coups.', ids: [] },
+  { name: 'Difficiles', desc: 'Plus de 60 coups.', ids: [] },
+];
+for (let i = 0; i < L.COUNT; i++) {
+  const par = L.level(i).par;
+  CATS[HINTS[i] ? 0 : par < 30 ? 1 : par <= 60 ? 2 : 3].ids.push(i);
+}
+for (const c of CATS.slice(1)) c.ids.sort((a, b) => L.level(a).par - L.level(b).par);
+const catOf = i => CATS.find(c => c.ids.includes(i));
+const stars = n => n ? '★'.repeat(n) + '☆'.repeat(3 - n) : '☆☆☆';
+
+function showMenu() {
+  $('cats').innerHTML = CATS.map(c => {
+    const done = c.ids.filter(i => save.best[i]).length;
+    return '<div class="cat"><h2>' + c.name + '<span>' + done + ' / ' + c.ids.length + ' réussis</span></h2><p>' + c.desc + '</p><div class="lvls">'
+      + c.ids.map((i, k) => '<button data-i="' + i + '"><b>' + (k + 1) + '</b><i>' + L.level(i).par + ' coups</i><em>' + stars(save.best[i]) + '</em></button>').join('')
+      + '</div></div>';
+  }).join('');
+  $('cats').querySelectorAll('button').forEach(b => b.onclick = () => { $('menu').hidden = true; start(+b.dataset.i); });
+  $('menu').hidden = false;
+}
+
+let save = { last: 0, best: {} };
+try { save = Object.assign(save, JSON.parse(localStorage.getItem(KEY) || '{}')); } catch (e) {}
+const persist = () => { try { localStorage.setItem(KEY, JSON.stringify(save)); } catch (e) {} };
+
+let li = 0, lv, st, moves, hist, anim, queued, won, dead, shot, facing = 0;
+let TW, TH, WH, SLAB, ox, oy; // geometrie iso : tuile, hauteur de mur, epaisseur du socle, origine
+
+function start(i) {
+  li = i; lv = L.level(i);
+  save.last = i; persist();
+  st = L.init(lv); moves = 0; hist = []; anim = null; queued = null; won = false; dead = false; shot = null; facing = 0;
+  $('win').hidden = true;
+  $('hint').textContent = HINTS[i] || '';
+  resize(); hud();
+}
+
+function hud() {
+  let left = 0; for (let g = st.g & lv.gemMask; g; g >>>= 1) left += g & 1;
+  const kh = col => '●'.repeat(Math.max(0, L.keysHeld(lv, st, col)));
+  $('hKeys').innerHTML = '<b style="color:#e04848">' + kh('r') + '</b><b style="color:#4a86e8">' + kh('b') + '</b>';
+  const cat = catOf(li), pos = cat.ids.indexOf(li);
+  $('hLevel').textContent = cat.name + ' ' + (pos + 1) + ' / ' + cat.ids.length;
+  $('hGems').textContent = (lv.gems.length - left) + ' / ' + lv.gems.length;
+  $('hMoves').textContent = moves;
+  const b = save.best[li];
+  $('hBest').textContent = b ? '★'.repeat(b) + '☆'.repeat(3 - b) : 'objectif ' + lv.par;
+  $('bPrev').disabled = pos === 0;
+  $('bFwd').disabled = pos >= cat.ids.length - 1; // niveaux libres : on peut passer sans finir
+  $('bUndo').disabled = !hist.length;
+}
+
+function move(d) {
+  if (won || dead || shot) return;
+  if (anim) { queued = d; return; }
+  facing = d;
+  const ns = L.step(lv, st, d);
+  if (!ns) return;
+  hist.push({ st, moves });
+  anim = { prev: st, t: 0, push: ns.push, path: ns.path,
+    n: Math.max(ns.path.length, ns.push && !ns.push.tp ? dist(ns.push.from, ns.push.to) : 1) };
+  st = ns; moves++; hud();
+}
+
+function undo() {
+  if (anim || shot || !hist.length) return;
+  const s = hist.pop();
+  st = s.st; moves = s.moves; won = false; dead = false; queued = null;
+  $('win').hidden = true; hud();
+}
+
+function victory() {
+  won = true;
+  const stars = moves <= Math.ceil(lv.par * 1.1) ? 3 : moves <= lv.par * 1.5 ? 2 : 1;
+  save.best[li] = Math.max(save.best[li] || 0, stars);
+  persist(); hud();
+  const cat = catOf(li), last = cat.ids.indexOf(li) === cat.ids.length - 1;
+  $('winTitle').textContent = last ? cat.name + ' : terminé !' : 'Bravo !';
+  $('stars').textContent = '★'.repeat(stars) + '☆'.repeat(3 - stars);
+  $('winText').textContent = moves + ' coups (minimum possible : ' + lv.par + ')';
+  $('bNext').textContent = last ? 'Retour au menu' : 'Niveau suivant';
+  $('win').hidden = false;
+}
+
+function killed() {
+  dead = true;
+  $('winTitle').textContent = 'Aïe, une flèche !';
+  $('stars').textContent = '';
+  $('winText').textContent = 'Les statues tirent en ligne droite : abrite-toi derrière un rocher ou une caisse.';
+  $('bNext').textContent = 'Annuler ce pas';
+  $('win').hidden = false;
+}
+
+function resize() {
+  const n = (lv.w + lv.h) / 2;
+  const hFor = px => { const tw = (px - 8) / n; return tw * .5 * n + tw * .42 + tw * .14 + 14; };
+  let px = Math.max(280, Math.min(innerWidth - 24, 860));
+  const avail = Math.max(200, innerHeight - 280);
+  if (hFor(px) > avail) px = Math.max(280, px * avail / hFor(px));
+  TW = (px - 8) / n; TH = TW / 2; WH = TW * .42; SLAB = TW * .14;
+  ox = 4 + lv.h * TW / 2; oy = WH + 6;
+  const hpx = hFor(px), dpr = window.devicePixelRatio || 1;
+  cv.style.width = px + 'px'; cv.style.height = hpx + 'px';
+  cv.width = Math.round(px * dpr); cv.height = Math.round(hpx * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+// ---- dessin iso ----
+// centre ecran de la case (x,y), x et y pouvant etre fractionnaires
+const iso = (x, y) => [ox + (x - y) * TW / 2, oy + (x + y + 1) * TH / 2];
+const cellXY = c => [c % lv.w, (c / lv.w) | 0];
+const dist = (a, b) => { const A = cellXY(a), B = cellXY(b); return Math.abs(A[0] - B[0]) + Math.abs(A[1] - B[1]); };
+const lerpCell = (a, b, f) => { const A = cellXY(a), B = cellXY(b); return [A[0] + (B[0] - A[0]) * f, A[1] + (B[1] - A[1]) * f]; };
+
+function poly(pts, fill) {
+  ctx.beginPath(); pts.forEach(([x, y], k) => k ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
+  ctx.closePath(); ctx.fillStyle = fill; ctx.fill();
+}
+const diamond = (cx, cy, s = 1) => [[cx, cy - TH / 2 * s], [cx + TW / 2 * s, cy], [cx, cy + TH / 2 * s], [cx - TW / 2 * s, cy]];
+
+function drawBlock(cx, cy, h, top, left, right, s = 1) {
+  const a = TW / 2 * s, b = TH / 2 * s;
+  poly([[cx - a, cy], [cx, cy + b], [cx, cy + b - h], [cx - a, cy - h]], left);
+  poly([[cx + a, cy], [cx, cy + b], [cx, cy + b - h], [cx + a, cy - h]], right);
+  poly(diamond(cx, cy - h, s), top);
+}
+
+// Boite alignee sur la grille, coins (u0,v0)-(u1,v1) en coordonnees de grille, hauteur h.
+const pt = (u, v, z = 0) => { const p = iso(u - .5, v - .5); return [p[0], p[1] - z]; };
+function box(u0, v0, u1, v1, h, top, left, right) {
+  poly([pt(u0, v1), pt(u1, v1), pt(u1, v1, h), pt(u0, v1, h)], left);
+  poly([pt(u1, v0), pt(u1, v1), pt(u1, v1, h), pt(u1, v0, h)], right);
+  poly([pt(u0, v0, h), pt(u1, v0, h), pt(u1, v1, h), pt(u0, v1, h)], top);
+}
+
+// Mur, porte ou grille : tout ce a quoi une cloison se raccorde.
+const wallish = (i, j) => i >= 0 && j >= 0 && i < lv.w && j < lv.h && '#RBG'.includes(lv.tiles[j * lv.w + i]);
+
+// Porte ou grille : une barre fine en travers de la case, dans l'axe des murs voisins.
+function drawBar(x, y, h, C) {
+  const a = .5 - WT / 2, b = .5 + WT / 2;
+  if (wallish(x - 1, y) || wallish(x + 1, y)) box(x, y + a, x + 1, y + b, h, ...C);
+  else box(x + a, y, x + b, y + 1, h, ...C);
+}
+
+function drawKey(cx, cy, kind, time, i) {
+  ctx.fillStyle = 'rgba(0,0,0,.25)';
+  ctx.beginPath(); ctx.ellipse(cx, cy, TW * .14, TH * .14, 0, 0, 7); ctx.fill();
+  const y = cy - TW * (.22 + .03 * Math.sin(time * 3 + i)), u = TW;
+  const line = (col, w) => {
+    ctx.strokeStyle = col; ctx.lineWidth = w; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.arc(cx - u * .1, y, u * .075, 0, 7);
+    ctx.moveTo(cx - u * .025, y); ctx.lineTo(cx + u * .19, y);
+    ctx.moveTo(cx + u * .11, y); ctx.lineTo(cx + u * .11, y + u * .07);
+    ctx.moveTo(cx + u * .18, y); ctx.lineTo(cx + u * .18, y + u * .07);
+    ctx.stroke();
+  };
+  line('rgba(0,0,0,.45)', u * .085);
+  line(kind === 'r' ? '#ff5a5a' : '#5a9bff', u * .05);
+}
+
+// Mur fin : un poteau central, relie aux murs voisins par des bras.
+const WT = .3; // epaisseur, en fraction de case
+function drawWall(x, y) {
+  const W = wallish;
+  const a = .5 - WT / 2, b = .5 + WT / 2, C = ['#bdb7a6', '#8f8878', '#746d5f'];
+  if (W(x, y - 1)) box(x + a, y, x + b, y + a, WH, ...C);
+  if (W(x - 1, y)) box(x, y + a, x + a, y + b, WH, ...C);
+  box(x + a, y + a, x + b, y + b, WH, ...C);
+  if (W(x + 1, y)) box(x + b, y + a, x + 1, y + b, WH, ...C);
+  if (W(x, y + 1)) box(x + a, y + b, x + b, y + 1, WH, ...C);
+}
+
+// Statue tireuse : un totem de pierre, fleche rouge sur le dessus, bouche sur la face visible.
+function drawShooter(x, y, d) {
+  const H = WH * 1.4, [dx, dy] = L.DIRS[d];
+  box(x + .2, y + .2, x + .8, y + .8, H, '#d6cfba', '#a39b87', '#857d6c');
+  ctx.fillStyle = '#2b1b1b';
+  if (d === 0) { const p = pt(x + .8, y + .5, H * .55); ctx.beginPath(); ctx.ellipse(p[0], p[1], TW * .05, TW * .07, 0, 0, 7); ctx.fill(); }
+  if (d === 2) { const p = pt(x + .5, y + .8, H * .55); ctx.beginPath(); ctx.ellipse(p[0], p[1], TW * .05, TW * .07, 0, 0, 7); ctx.fill(); }
+  const a = pt(x + .5 - dx * .2, y + .5 - dy * .2, H), b = pt(x + .5 + dx * .2, y + .5 + dy * .2, H);
+  const l = pt(x + .5 + dx * .04 - dy * .13, y + .5 + dy * .04 + dx * .13, H), r = pt(x + .5 + dx * .04 + dy * .13, y + .5 + dy * .04 - dx * .13, H);
+  ctx.strokeStyle = '#c0392b'; ctx.lineWidth = Math.max(1.5, TW * .035); ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.moveTo(l[0], l[1]); ctx.lineTo(b[0], b[1]); ctx.lineTo(r[0], r[1]); ctx.stroke();
+}
+
+// Fleche en vol, f de 0 (statue) a 1 (cible).
+function drawArrow(from, to, f) {
+  const A = iso(...cellXY(from)), B = iso(...cellXY(to)), z = TW * .34;
+  const x = A[0] + (B[0] - A[0]) * f, y = A[1] + (B[1] - A[1]) * f - z;
+  const n = Math.hypot(B[0] - A[0], B[1] - A[1]) || 1, ux = (B[0] - A[0]) / n, uy = (B[1] - A[1]) / n, len = TW * .42;
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = '#7a4a22'; ctx.lineWidth = Math.max(2, TW * .035);
+  ctx.beginPath(); ctx.moveTo(x - ux * len, y - uy * len); ctx.lineTo(x, y); ctx.stroke();
+  ctx.strokeStyle = '#e8e8ee'; ctx.lineWidth = Math.max(2, TW * .05);
+  ctx.beginPath(); ctx.moveTo(x - ux * len * .12, y - uy * len * .12); ctx.lineTo(x, y); ctx.stroke();
+  ctx.strokeStyle = '#c0392b';
+  ctx.beginPath(); ctx.moveTo(x - ux * len, y - uy * len); ctx.lineTo(x - ux * len * .8, y - uy * len * .8); ctx.stroke();
+}
+
+function drawRock(cx, cy) {
+  ctx.fillStyle = 'rgba(0,0,0,.28)';
+  ctx.beginPath(); ctx.ellipse(cx, cy + TH * .08, TW * .3, TH * .28, 0, 0, 7); ctx.fill();
+  const r = TW * .29, y = cy - TW * .17;
+  ctx.fillStyle = '#6f6f80'; ctx.beginPath(); ctx.ellipse(cx, y, r, r * .88, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = '#9d9db0'; ctx.beginPath(); ctx.ellipse(cx - r * .12, y - r * .14, r * .78, r * .66, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = '#c4c4d4'; ctx.beginPath(); ctx.ellipse(cx - r * .3, y - r * .36, r * .3, r * .2, -.5, 0, 7); ctx.fill();
+  ctx.strokeStyle = '#5a5a6a'; ctx.lineWidth = Math.max(1, TW * .015);
+  ctx.beginPath(); ctx.moveTo(cx + r * .1, y + r * .1); ctx.lineTo(cx + r * .4, y + r * .3); ctx.lineTo(cx + r * .35, y + r * .55); ctx.stroke();
+}
+
+function drawCrate(cx, cy) {
+  const h = TW * .34, s = .66;
+  drawBlock(cx, cy, h, '#dcae66', '#b27c3c', '#8f5f2a', s);
+  poly(diamond(cx, cy - h, s * .72), '#c9984f');
+  ctx.strokeStyle = '#6e4720'; ctx.lineWidth = Math.max(1, TW * .018);
+  const a = TW / 2 * s, b = TH / 2 * s;
+  ctx.beginPath();
+  ctx.moveTo(cx - a, cy - h); ctx.lineTo(cx, cy + b); ctx.moveTo(cx - a, cy); ctx.lineTo(cx, cy + b - h);
+  ctx.moveTo(cx + a, cy - h); ctx.lineTo(cx, cy + b); ctx.moveTo(cx + a, cy); ctx.lineTo(cx, cy + b - h);
+  ctx.stroke();
+}
+
+function drawGem(cx, cy, color, time, i) {
+  ctx.fillStyle = 'rgba(0,0,0,.25)';
+  ctx.beginPath(); ctx.ellipse(cx, cy, TW * .16, TH * .16, 0, 0, 7); ctx.fill();
+  const s = TW * .78, gy = cy - TW * (.24 + .03 * Math.sin(time * 3 + i));
+  const P = [[-.3, -.08], [-.16, -.28], [.16, -.28], [.3, -.08], [0, .32]].map(([x, y]) => [cx + x * s, gy + y * s]);
+  poly(P, color);
+  ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = Math.max(1, TW * .02);
+  ctx.beginPath();
+  ctx.moveTo(P[0][0], P[0][1]); ctx.lineTo(P[3][0], P[3][1]);
+  ctx.moveTo(cx - .1 * s, gy - .08 * s); ctx.lineTo(P[4][0], P[4][1]); ctx.lineTo(cx + .1 * s, gy - .08 * s);
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,.8)';
+  ctx.beginPath(); ctx.arc(cx - .12 * s, gy - .17 * s, TW * .028, 0, 7); ctx.fill();
+}
+
+// Petite exploratrice, dessinee dans un repere de 100 unites par tuile, pieds en (0,0).
+function drawPlayer(cx, cy, time) {
+  const back = facing === 1 || facing === 3;          // s'eloigne : vue de dos
+  const flip = facing === 0 || facing === 3 ? 1 : -1; // regarde a droite ou a gauche
+  const ph = anim ? Math.sin(time * 16) : 0, bob = anim ? Math.abs(ph) * 2 : Math.sin(time * 3) * .8;
+  const SKIN = '#eec3a0', HAIR = '#aaa49b', HAIR2 = '#cdc8c0', TOP = '#c2315f', TRIM = '#8f1f43';
+  const LEGS = '#3b4a7a', DARK = '#2b1b3d', RED = '#d63a3a';
+  const dot = (x, y, r, c) => { ctx.fillStyle = c; ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill(); };
+  const limb = (x1, y1, x2, y2, w, c) => {
+    ctx.strokeStyle = c; ctx.lineWidth = w; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+  };
+  ctx.save();
+  ctx.translate(cx, cy); ctx.scale(TW / 100, TW / 100);
+  ctx.fillStyle = 'rgba(0,0,0,.28)';
+  ctx.beginPath(); ctx.ellipse(0, 0, 17, 7, 0, 0, 7); ctx.fill();
+  ctx.scale(flip, 1); ctx.translate(0, -bob);
+  limb(-5, -28, -5 + ph * 7, -4, 8, LEGS); limb(5, -28, 5 - ph * 7, -4, 8, LEGS);
+  dot(-4 + ph * 7, -2, 4.5, DARK); dot(6 - ph * 7, -2, 4.5, DARK);
+  // longs cheveux gris laches : derriere le corps vue de face, par-dessus vue de dos
+  const hair = () => { ctx.fillStyle = HAIR; ctx.beginPath(); ctx.roundRect(-16, -81, 32, 43, [14, 14, 7, 7]); ctx.fill(); };
+  if (!back) hair();
+  limb(-11, -50, -15 - ph * 6, -33, 6, TOP); dot(-15 - ph * 6, -31, 3.5, SKIN);
+  ctx.fillStyle = TOP; ctx.beginPath(); ctx.roundRect(-12, -56, 24, 30, 8); ctx.fill();
+  ctx.fillStyle = TRIM; ctx.fillRect(-12, -31, 24, 4); // bord-cote du pull
+  limb(11, -50, 15 + ph * 6, -33, 6, TOP); dot(15 + ph * 6, -31, 3.5, SKIN);
+  if (back) {
+    hair();
+    limb(-6, -76, -7, -43, 2, HAIR2); limb(5, -76, 6, -43, 2, HAIR2);
+  } else {
+    ctx.fillStyle = TRIM; ctx.beginPath(); ctx.roundRect(-6, -58, 12, 5, 2.5); ctx.fill(); // col rond
+    dot(0, -68, 13, SKIN);
+    ctx.fillStyle = HAIR;
+    ctx.beginPath(); ctx.arc(0, -68, 13.8, Math.PI * .9, Math.PI * 2.1); ctx.quadraticCurveTo(6, -78, -13, -64); ctx.fill();
+    limb(-12.5, -68, -13, -45, 5, HAIR); limb(12.5, -66, 13, -45, 4, HAIR);
+    limb(-9, -78, -12, -50, 1.5, HAIR2);
+    dot(1, -66, 1.7, DARK); dot(8, -66, 1.7, DARK);
+    // lunettes : verres clairs, monture rouge sur le haut
+    ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.roundRect(-2.8, -69.5, 7, 6.2, 2); ctx.roundRect(5.2, -69.5, 7, 6.2, 2); ctx.stroke();
+    limb(-3.5, -69.6, 12.6, -69.6, 2, RED);
+    dot(-3, -60.5, 2.4, 'rgba(255,120,140,.4)');
+    ctx.strokeStyle = DARK; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.arc(4.5, -62, 4, .2 * Math.PI, .8 * Math.PI); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawFloor(x, y, c, world, time) {
+  const t = lv.tiles[c], [cx, cy] = iso(x, y);
+  if (t === ' ') return;
+  if (y === lv.h - 1) poly([[cx - TW / 2, cy], [cx, cy + TH / 2], [cx, cy + TH / 2 + SLAB], [cx - TW / 2, cy + SLAB]], '#7a5536');
+  if (x === lv.w - 1) poly([[cx + TW / 2, cy], [cx, cy + TH / 2], [cx, cy + TH / 2 + SLAB], [cx + TW / 2, cy + SLAB]], '#5f4129');
+  const wave = .5 + .5 * Math.sin(time * 2.5 + x * 1.3 + y * .9);
+  if (t === '~') {
+    if (world.f[c]) { poly(diamond(cx, cy), '#5d5d6c'); poly(diamond(cx, cy, .8), '#7c7c8e'); }
+    else {
+      poly(diamond(cx, cy), '#b3261e');
+      poly(diamond(cx, cy, .86), `rgb(255,${Math.round(90 + 70 * wave)},40)`);
+      poly(diamond(cx + TW * .08, cy - TH * .05, .3 + .15 * wave), '#ffd166');
+    }
+  } else if (t === '=') {
+    if (world.f[c]) { poly(diamond(cx, cy), '#1f5f9e'); poly(diamond(cx, cy, .82), '#c9984f'); poly(diamond(cx, cy, .58), '#dcae66'); }
+    else {
+      poly(diamond(cx, cy), '#1f5f9e');
+      poly(diamond(cx, cy, .9), '#2f86d6');
+      poly(diamond(cx - TW * .1 + TW * .12 * wave, cy, .28), 'rgba(255,255,255,.35)');
+    }
+  } else {
+    poly(diamond(cx, cy), (x + y) % 2 ? '#6fae4e' : '#67a548');
+    if (t === '.') { // herbes, fleurs et cailloux, places par un hachage stable de la case
+      const hsh = ((x * 73856093) ^ (y * 19349663) ^ ((li + 1) * 83492791)) >>> 0, k = hsh % 7;
+      const fx = cx + ((hsh >> 4) % 9 - 4) * TW * .03, fy = cy + ((hsh >> 8) % 7 - 3) * TH * .05;
+      if (k === 0) {
+        ctx.fillStyle = ['#ffffff', '#ffe066', '#ffb3c7'][(hsh >> 12) % 3];
+        for (let i = 0; i < 5; i++) { ctx.beginPath(); ctx.arc(fx + Math.cos(i * 1.257) * TW * .028, fy + Math.sin(i * 1.257) * TW * .02, TW * .018, 0, 7); ctx.fill(); }
+        ctx.fillStyle = '#e09a1f'; ctx.beginPath(); ctx.arc(fx, fy, TW * .014, 0, 7); ctx.fill();
+      } else if (k < 3) {
+        ctx.strokeStyle = '#4c8a36'; ctx.lineWidth = Math.max(1, TW * .018); ctx.lineCap = 'round';
+        ctx.beginPath();
+        for (const o of [-1, 0, 1]) { ctx.moveTo(fx + o * TW * .025, fy); ctx.lineTo(fx + o * TW * .05, fy - TW * .07); }
+        ctx.stroke();
+      } else if (k === 3) {
+        ctx.fillStyle = '#9a9488'; ctx.beginPath(); ctx.ellipse(fx, fy, TW * .035, TW * .02, 0, 0, 7); ctx.fill();
+      }
+    }
+    if (t === 'i') { // glace
+      poly(diamond(cx, cy), (x + y) % 2 ? '#d3ecf8' : '#c3e3f4');
+      ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.lineWidth = Math.max(1, TW * .02); ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(cx - TW * .18, cy); ctx.lineTo(cx - TW * .02, cy - TH * .16);
+      ctx.moveTo(cx + TW * .04, cy + TH * .1); ctx.lineTo(cx + TW * .14, cy); ctx.stroke();
+    } else if (t === '_') { // plaque de pression
+      const on = world.p === c || world.o[c];
+      poly(diamond(cx, cy, .66), '#5c606b');
+      poly(diamond(cx, cy - (on ? 0 : TH * .08), .52), on ? '#8a8f9c' : '#d5d9e2');
+    } else if (t === '1' || t === '2') { // teleporteur
+      const rgb = t === '1' ? '170,90,255' : '255,150,40';
+      for (const r of [.4, .27, .14]) {
+        const k = r * (.88 + .12 * Math.sin(time * 4 + r * 20));
+        ctx.strokeStyle = 'rgba(' + rgb + ',.9)'; ctx.lineWidth = Math.max(1.5, TW * .03);
+        ctx.beginPath(); ctx.ellipse(cx, cy, TW * k, TH * k, 0, 0, 7); ctx.stroke();
+      }
+      ctx.fillStyle = 'rgba(' + rgb + ',.5)'; ctx.beginPath(); ctx.ellipse(cx, cy, TW * .08, TH * .08, 0, 0, 7); ctx.fill();
+    } else if (t === '%') { // dalle fragile, ou trou une fois effondree
+      if (world.f[c]) { poly(diamond(cx, cy), '#4a3520'); poly(diamond(cx, cy + TH * .07, .82), '#17110a'); }
+      else {
+        poly(diamond(cx, cy, .96), '#c2ab7c');
+        ctx.strokeStyle = '#6e5a3a'; ctx.lineWidth = Math.max(1, TW * .018); ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(cx - TW * .22, cy - TH * .05); ctx.lineTo(cx - TW * .05, cy + TH * .04); ctx.lineTo(cx + TW * .02, cy - TH * .14);
+        ctx.moveTo(cx - TW * .05, cy + TH * .04); ctx.lineTo(cx + TW * .16, cy + TH * .12); ctx.stroke();
+      }
+    } else if ((t === 'R' || t === 'B') && world.f[c]) { // seuil d'une porte ouverte
+      poly(diamond(cx, cy, .5), t === 'R' ? 'rgba(224,72,72,.4)' : 'rgba(74,134,232,.4)');
+    }
+    if (t === 'E') {
+      const open = (st.g & lv.gemMask) === 0;
+      poly(diamond(cx, cy, .84), open ? '#c9b458' : '#8a8577');
+      poly(diamond(cx, cy, .6), open ? `rgba(255,244,160,${.6 + .4 * wave})` : '#6d695e');
+      if (open) {
+        const g = ctx.createLinearGradient(0, cy - TW * .9, 0, cy);
+        g.addColorStop(0, 'rgba(255,244,160,0)'); g.addColorStop(1, 'rgba(255,244,160,.45)');
+        poly([[cx - TW * .28, cy], [cx + TW * .28, cy], [cx + TW * .2, cy - TW * .9], [cx - TW * .2, cy - TW * .9]], g);
+      }
+    }
+  }
+}
+
+function draw(time) {
+  const { w, h } = lv;
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  // pendant un pas, le decor reste celui d'avant le pas ; l'objet pousse est dessine a part
+  const world = anim ? anim.prev : st;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) drawFloor(x, y, y * w + x, world, time);
+  // lignes de tir : petites marques rouges sur les cases exposees
+  for (const sh of lv.shooters) for (const c of L.line(lv, world, sh)) {
+    const [cx, cy] = iso(...cellXY(c));
+    poly(diamond(cx, cy, .16), 'rgba(200,40,30,.6)');
+  }
+
+  const movers = [];
+  let px, py;
+  if (anim) { // une case par unite de temps ; un saut de teleporteur est instantane
+    const k = Math.min(Math.floor(anim.t), anim.path.length - 1), f = Math.min(1, anim.t - k);
+    const a = k ? anim.path[k - 1] : anim.prev.p, b = anim.path[k];
+    [px, py] = dist(a, b) === 1 ? lerpCell(a, b, f) : cellXY(f < .5 ? a : b);
+  } else [px, py] = cellXY(st.p);
+  movers.push({ x: px, y: py, kind: '@' });
+  if (anim && anim.push) {
+    const q = anim.push, n = q.tp ? 0 : dist(q.from, q.to);
+    const [mx, my] = n ? lerpCell(q.from, q.to, Math.min(1, anim.t / n)) : cellXY(anim.t < .5 ? q.from : q.to);
+    movers.push({ x: mx, y: my, kind: q.kind });
+  }
+  movers.sort((a, b) => a.x + a.y - b.x - b.y);
+
+  for (let d = 0; d <= w + h - 2; d++) {
+    for (let x = Math.max(0, d - h + 1); x <= Math.min(w - 1, d); x++) {
+      const y = d - x, c = y * w + x, [cx, cy] = iso(x, y), o = world.o[c], it = lv.itemAt[c], t = lv.tiles[c];
+      if ((t === 'R' || t === 'B') && !world.f[c]) drawBar(x, y, WH, t === 'R' ? ['#f07a7a', '#d04444', '#a83232'] : ['#7aa6f0', '#4a7ad6', '#3560b0']);
+      if (t === 'G') drawBar(x, y, L.gatesOpen(lv, world) ? WH * .1 : WH * .9, ['#8a8f9c', '#5c606b', '#474a54']);
+      if (lv.tiles[c] === '#') { drawWall(x, y); if (c in lv.shootAt) drawShooter(x, y, lv.shootAt[c]); }
+      else if (o && !(anim && anim.push && anim.push.from === c)) (o === 'o' ? drawRock : drawCrate)(cx, cy);
+      else if (it !== undefined && (st.g >> it) & 1) {
+        if (lv.items[it].t === '*') drawGem(cx, cy, COLORS[it % COLORS.length], time, c);
+        else drawKey(cx, cy, lv.items[it].t, time, c);
+      }
+    }
+    for (const m of movers) if (Math.floor(m.x + m.y + 1e-6) === d) {
+      const [cx, cy] = iso(m.x, m.y);
+      if (m.kind === '@') drawPlayer(cx, cy, time); else (m.kind === 'o' ? drawRock : drawCrate)(cx, cy);
+    }
+  }
+  if (shot) drawArrow(shot.from, shot.to, Math.min(1, shot.t));
+}
+
+let lastT = 0;
+function frame(ms) {
+  const t = ms / 1000, dt = Math.min(.05, t - lastT); lastT = t;
+  if (anim) {
+    anim.t += dt * SPEED * (anim.n > 1 ? 1.8 : 1);
+    if (anim.t >= anim.n) {
+      anim = null;
+      if (st.dead) { queued = null; shot = { t: 0, from: st.dead.c, to: st.p }; }
+      else if (L.won(lv, st)) victory();
+      else if (queued !== null) { const d = queued; queued = null; move(d); }
+    }
+  }
+  if (shot) {
+    const A = cellXY(shot.from), B = cellXY(shot.to);
+    shot.t += dt * 16 / Math.max(1, Math.abs(A[0] - B[0]) + Math.abs(A[1] - B[1]));
+    if (shot.t >= 1) { shot = null; killed(); }
+  }
+  draw(t);
+  requestAnimationFrame(frame);
+}
+
+// ---- commandes : 0 = bas-droite, 1 = haut-gauche, 2 = bas-gauche, 3 = haut-droite ----
+const KEYS = { ArrowRight: 0, d: 0, ArrowLeft: 1, q: 1, a: 1, ArrowDown: 2, s: 2, ArrowUp: 3, z: 3, w: 3 };
+addEventListener('keydown', e => {
+  if (!$('menu').hidden) return;
+  if (e.key === 'Escape') return showMenu();
+  const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  if (k in KEYS) { e.preventDefault(); move(KEYS[k]); }
+  else if (k === 'Backspace' || k === 'u') undo();
+  else if (k === 'r') start(li);
+  else if (k === 'Enter' && won) $('bNext').click();
+});
+let down = null;
+cv.addEventListener('pointerdown', e => { down = [e.clientX, e.clientY]; });
+addEventListener('pointerup', e => {
+  if (!down) return;
+  const dx = e.clientX - down[0], dy = e.clientY - down[1]; down = null;
+  if (Math.hypot(dx, dy) < 20) return;
+  const gx = dx + 2 * dy, gy = 2 * dy - dx; // geste ramene sur les axes de la grille
+  move(Math.abs(gx) >= Math.abs(gy) ? (gx > 0 ? 0 : 1) : (gy > 0 ? 2 : 3));
+});
+document.querySelectorAll('#pad button').forEach(b => b.onclick = () => move(+b.dataset.d));
+$('bUndo').onclick = undo;
+$('bReset').onclick = () => start(li);
+const near = k => { const ids = catOf(li).ids; return ids[ids.indexOf(li) + k]; }; // voisin dans la categorie
+$('bPrev').onclick = () => start(near(-1));
+$('bFwd').onclick = () => start(near(1));
+$('bMenu').onclick = showMenu;
+$('bNext').onclick = () => dead ? undo() : near(1) === undefined ? showMenu() : start(near(1));
+addEventListener('resize', resize);
+
+start(Math.min(save.last || 0, L.COUNT - 1));
+showMenu();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
