@@ -1,6 +1,6 @@
 # Chasse aux Gemmes
 
-Un jeu de puzzle HTML5 en vue isométrique, fait pour Lori.
+Un jeu de puzzle HTML5 en vue isométrique.
 On ramasse toutes les gemmes d'un niveau, puis on rejoint la sortie, en poussant rochers et caisses au bon endroit.
 
 **Jouer :** https://guillaumejay.github.io/chasse-aux-gemmes/

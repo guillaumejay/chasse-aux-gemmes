@@ -31,6 +31,8 @@
   #win p { margin:0; color:var(--dim); }
   #win button { background:var(--accent); color:#3a2408; border:0; font-weight:600; }
   small { color:var(--dim); text-align:center; }
+  a.gh { color:var(--dim); font-size:13px; }
+  a.gh:hover { color:var(--accent); }
   #menu { position:fixed; inset:0; z-index:5; overflow:auto; background:var(--bg);
     display:flex; flex-direction:column; align-items:center; gap:14px; padding:24px 12px; }
   #menu[hidden] { display:none; }
@@ -50,8 +52,9 @@
 <body>
 <div id="menu">
   <h1>Chasse aux <span>Gemmes</span></h1>
-  <p>Choisis un niveau, Lori !</p>
+  <p>Choisis un niveau !</p>
   <div id="cats" style="display:contents"></div>
+  <a class="gh" href="https://github.com/guillaumejay/chasse-aux-gemmes" target="_blank" rel="noopener">Code source sur GitHub</a>
 </div>
 <h1>Chasse aux <span>Gemmes</span></h1>
 <div id="hud">
@@ -83,6 +86,7 @@
   <button id="bFwd" title="Niveau suivant">▶</button>
 </nav>
 <small>Clavier : ← ↖ · ↑ ↗ · → ↘ · ↓ ↙. Ou glisser le doigt en diagonale. Retour arrière = annuler, R = recommencer.</small>
+<a class="gh" href="https://github.com/guillaumejay/chasse-aux-gemmes" target="_blank" rel="noopener">Code source sur GitHub</a>
 
 <script src="logic.js"></script>
 <script>
