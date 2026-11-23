@@ -5,7 +5,7 @@ On ramasse toutes les gemmes d'un niveau, puis on rejoint la sortie, en poussant
 
 **Jouer :** https://guillaumejay.github.io/chasse-aux-gemmes/
 
-Jeu original, dans la tradition des jeux de réflexion « à pousser » : nom, niveaux et graphismes sont propres à ce projet.
+Jeu totalement inspiré de Rich Diamond, dans la tradition des jeux de réflexion « à pousser » : nom, niveaux et graphismes sont propres à ce projet.
 
 ## Règles
 
